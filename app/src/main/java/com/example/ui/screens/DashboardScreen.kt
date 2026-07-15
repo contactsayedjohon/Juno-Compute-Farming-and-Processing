@@ -4,7 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.compose.ui.platform.LocalContextimport androidx.compose.animation.core.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
