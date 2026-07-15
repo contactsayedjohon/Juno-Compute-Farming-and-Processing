@@ -11,6 +11,7 @@ class JunoAccessibilityService : AccessibilityService() {
         if (event == null) return
         val rootNode = rootInActiveWindow ?: return
         val targetTexts = listOf(
+            "A single app", "একক অ্যাপ",
             "Entire screen", "সম্পূর্ণ স্ক্রীন",
             "Start now", "Allow", "Start", "শুরু করুন", "অনুমতি দিন"
         )
