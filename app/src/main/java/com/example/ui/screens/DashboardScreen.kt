@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.core.*
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContextimport androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,6 +45,8 @@ fun DashboardScreen(viewModel: JunoViewModel, onUnpairTriggered: () -> Unit) {
     val taskProgress by viewModel.taskProgress.collectAsState()
     val tasksCompleted by viewModel.tasksCompletedToday.collectAsState()
     val vitals by viewModel.vitals.collectAsState()
+    
+    val context = LocalContext.current
 
     // Pulse animation for Processing state
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -122,12 +128,28 @@ fun DashboardScreen(viewModel: JunoViewModel, onUnpairTriggered: () -> Unit) {
                         .border(1.dp, JunoBorder.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.SettingsInputComponent,
-                        contentDescription = "Node Status Icon",
-                        tint = JunoPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    IconButton(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                try {
+                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    val intent = Intent(Settings.ACTION_SETTINGS)
+                                    context.startActivity(intent)
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SettingsInputComponent,
+                            contentDescription = "Node Status Icon",
+                            tint = JunoPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
 

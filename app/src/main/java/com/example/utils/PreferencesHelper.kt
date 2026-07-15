@@ -54,7 +54,12 @@ class PreferencesHelper(context: Context) {
         set(value) = prefs.edit().putString("pairing_token", value).apply()
 
     var deviceName: String
-        get() = prefs.getString("device_name", defaultDeviceName()) ?: defaultDeviceName()
+        get() {
+            if (!prefs.contains("device_name")) {
+                prefs.edit().putString("device_name", defaultDeviceName()).apply()
+            }
+            return prefs.getString("device_name", "") ?: ""
+        }
         set(value) = prefs.edit().putString("device_name", value).apply()
 
     var tags: String
