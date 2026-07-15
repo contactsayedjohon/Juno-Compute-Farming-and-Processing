@@ -10,7 +10,10 @@ class JunoAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val rootNode = rootInActiveWindow ?: return
-        val targetTexts = listOf("Start now", "Allow", "Start", "শুরু করুন", "অনুমতি দিন")
+        val targetTexts = listOf(
+            "Entire screen", "সম্পূর্ণ স্ক্রীন",
+            "Start now", "Allow", "Start", "শুরু করুন", "অনুমতি দিন"
+        )
         for (text in targetTexts) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
             if (!nodes.isNullOrEmpty()) {
