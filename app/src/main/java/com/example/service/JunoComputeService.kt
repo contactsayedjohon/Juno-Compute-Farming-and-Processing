@@ -152,6 +152,22 @@ class JunoComputeService : Service() {
 
         // Start thermal safety checks
         startThermalSafetyLoop()
+
+        // Write device ID to external storage for ADB mapping
+        writeDeviceIdToFile()
+    }
+
+    private fun writeDeviceIdToFile() {
+        try {
+            val extDir = getExternalFilesDir(null)
+            if (extDir != null) {
+                val file = File(extDir, "device_id.txt")
+                file.writeText(getUniqueAndroidId())
+                JunoServiceState.log("Saved device ID mapping to external storage: ${file.absolutePath}")
+            }
+        } catch (e: Exception) {
+            JunoServiceState.log("Failed to write device ID to file: ${e.localizedMessage}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -325,6 +341,7 @@ class JunoComputeService : Service() {
                 put("gpu_model", "Adreno 660")
                 put("storage_free_mb", getFreeStorageMb())
                 put("app_version", "1.0.0")
+                put("ip_address", getLocalIpAddress())
             }
             webSocket?.send(registration.toString())
             JunoServiceState.log("Registered node specs: ${prefs.deviceName} for user ${prefs.userId}")
@@ -377,6 +394,7 @@ class JunoComputeService : Service() {
                             put("network_type", network.lowercase())
                             put("network_speed_mbps", networkSpeedKbps / 1000.0)
                             put("storage_free_mb", storageFree)
+                            put("ip_address", ip)
                             put("current_task_id", activeTaskId ?: JSONObject.NULL)
                             put("current_task_progress", if (activeTaskId != null) JunoServiceState.taskProgress.value else JSONObject.NULL)
                         }
@@ -505,8 +523,20 @@ class JunoComputeService : Service() {
                     if (projectionIntent != null) {
                         startScreenCapture(projectionIntent!!)
                     } else {
-                        val requestIntent = Intent("com.example.REQUEST_SCREEN_CAPTURE")
-                        sendBroadcast(requestIntent)
+                        try {
+                            val activityIntent = Intent(this, Class.forName("com.example.MainActivity")).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(activityIntent)
+                        } catch (e: Exception) {
+                            JunoServiceState.log("Failed to launch MainActivity: ${e.localizedMessage}")
+                        }
+
+                        serviceScope.launch {
+                            delay(500L)
+                            val requestIntent = Intent("com.example.REQUEST_SCREEN_CAPTURE")
+                            sendBroadcast(requestIntent)
+                        }
                         JunoServiceState.log("Requesting MediaProjection screen capture permission via MainActivity broadcast")
                     }
                 }

@@ -28,26 +28,27 @@ import com.example.ui.theme.JunoPrimary
 import com.example.ui.theme.JunoBorder
 import com.example.ui.theme.JunoTextSecondary
 import com.example.viewmodel.JunoViewModel
-
+import com.example.service.JunoComputeService
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.projection.MediaProjectionManager
-import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Build
 
 class MainActivity : ComponentActivity() {
     private val viewModel: JunoViewModel by viewModels()
 
-    private val projectionLauncher = registerForActivityResult(
+    private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            val serviceIntent = Intent(this, com.example.service.JunoComputeService::class.java).apply {
-                action = com.example.service.JunoComputeService.ACTION_START_MIRROR
-                putExtra(com.example.service.JunoComputeService.EXTRA_PROJECTION_RESULT_INTENT, result.data)
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val serviceIntent = Intent(this, JunoComputeService::class.java).apply {
+                action = JunoComputeService.ACTION_START_MIRROR
+                putExtra(JunoComputeService.EXTRA_PROJECTION_RESULT_INTENT, result.data)
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
             } else {
                 startService(serviceIntent)
@@ -55,11 +56,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val receiver = object : BroadcastReceiver() {
+    private val screenCaptureReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == "com.example.REQUEST_SCREEN_CAPTURE") {
-                val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            try {
+                screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            } catch (e: Exception) {
+                viewModel.startWorkerService()
             }
         }
     }
@@ -68,16 +71,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val filter = IntentFilter("com.example.REQUEST_SCREEN_CAPTURE")
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(receiver, filter)
-        }
-
         // Auto launch foreground service on startup if already paired
         if (viewModel.prefs.isPaired) {
             viewModel.startWorkerService()
+        }
+
+        // Register receiver for MediaProjection trigger
+        val filter = IntentFilter("com.example.REQUEST_SCREEN_CAPTURE")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenCaptureReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(screenCaptureReceiver, filter)
         }
 
         setContent {
@@ -93,10 +97,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        try {
-            unregisterReceiver(receiver)
-        } catch (e: Exception) {}
         super.onDestroy()
+        try {
+            unregisterReceiver(screenCaptureReceiver)
+        } catch (e: Exception) {
+            // Ignored
+        }
     }
 }
 
