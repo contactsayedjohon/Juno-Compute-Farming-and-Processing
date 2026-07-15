@@ -28,6 +28,14 @@ jobs:
           gradle-version: '9.3.1'
           validate-wrappers: false
 
+      - name: Decode Debug Keystore
+        run: |
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          else
+            echo "debug.keystore.base64 not found!"
+          fi
+
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
 
@@ -38,10 +46,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: junocompute-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
 
-      - name: Upload Release APK (Unsigned)
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: junocompute-release-unsigned-apk
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: junocompute-release-apk
+          path: app/build/outputs/apk/release/*.apk
