@@ -43,6 +43,7 @@ import java.net.InetAddress
 import java.net.Socket
 import java.net.URL
 import java.util.concurrent.TimeUnit
+import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.hardware.display.VirtualDisplay
@@ -139,7 +140,15 @@ class JunoComputeService : Service() {
 
         // Create notification channel
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildForegroundNotification("Connecting to JunoCompute Cluster...", "IDLE — Waiting for tasks"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildForegroundNotification("Connecting to JunoCompute Cluster...", "IDLE — Waiting for tasks"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildForegroundNotification("Connecting to JunoCompute Cluster...", "IDLE — Waiting for tasks"))
+        }
 
         // Load metrics count from preference
         JunoServiceState.setTasksCompleted(prefs.tasksCompletedToday)
