@@ -29,12 +29,51 @@ import com.example.ui.theme.JunoBorder
 import com.example.ui.theme.JunoTextSecondary
 import com.example.viewmodel.JunoViewModel
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.projection.MediaProjectionManager
+import androidx.activity.result.contract.ActivityResultContracts
+
 class MainActivity : ComponentActivity() {
     private val viewModel: JunoViewModel by viewModels()
+
+    private val projectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val serviceIntent = Intent(this, com.example.service.JunoComputeService::class.java).apply {
+                action = com.example.service.JunoComputeService.ACTION_START_MIRROR
+                putExtra(com.example.service.JunoComputeService.EXTRA_PROJECTION_RESULT_INTENT, result.data)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        }
+    }
+
+    private val receiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.REQUEST_SCREEN_CAPTURE") {
+                val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val filter = IntentFilter("com.example.REQUEST_SCREEN_CAPTURE")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
 
         // Auto launch foreground service on startup if already paired
         if (viewModel.prefs.isPaired) {
@@ -51,6 +90,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(receiver)
+        } catch (e: Exception) {}
+        super.onDestroy()
     }
 }
 

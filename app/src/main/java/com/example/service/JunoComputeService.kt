@@ -43,6 +43,15 @@ import java.net.InetAddress
 import java.net.Socket
 import java.net.URL
 import java.util.concurrent.TimeUnit
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.hardware.display.VirtualDisplay
+import android.hardware.display.DisplayManager
+import android.media.ImageReader
+import android.graphics.PixelFormat
+import android.graphics.Bitmap
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 
 class JunoComputeService : Service() {
 
@@ -84,6 +93,13 @@ class JunoComputeService : Service() {
     private var batteryTemp = 0.0f
     private var batteryPercent = 0
     private var isCharging = false
+
+    // Screen mirroring / Remote control
+    private var mediaProjection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
+    private var screenMirrorJob: Job? = null
+    private var projectionIntent: Intent? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -139,6 +155,25 @@ class JunoComputeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent != null) {
+            when (intent.action) {
+                ACTION_START_MIRROR -> {
+                    val resultIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(EXTRA_PROJECTION_RESULT_INTENT, Intent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(EXTRA_PROJECTION_RESULT_INTENT)
+                    }
+                    if (resultIntent != null) {
+                        projectionIntent = resultIntent
+                        startScreenCapture(resultIntent)
+                    }
+                }
+                ACTION_STOP_MIRROR -> {
+                    stopScreenCapture()
+                }
+            }
+        }
         return START_STICKY
     }
 
@@ -160,6 +195,7 @@ class JunoComputeService : Service() {
         }
 
         disconnectWebSocket()
+        stopScreenCapture()
         metricsJob?.cancel()
         thermalCheckJob?.cancel()
         heartbeatJob?.cancel()
@@ -464,6 +500,45 @@ class JunoComputeService : Service() {
                 "app_update" -> {
                     val apkUrl = obj.optString("apk_url")
                     triggerOtaSelfUpdate(apkUrl)
+                }
+                "start_screen_mirror" -> {
+                    if (projectionIntent != null) {
+                        startScreenCapture(projectionIntent!!)
+                    } else {
+                        val requestIntent = Intent("com.example.REQUEST_SCREEN_CAPTURE")
+                        sendBroadcast(requestIntent)
+                        JunoServiceState.log("Requesting MediaProjection screen capture permission via MainActivity broadcast")
+                    }
+                }
+                "stop_screen_mirror" -> {
+                    stopScreenCapture()
+                }
+                "inject_touch" -> {
+                    val action = obj.optString("action")
+                    if (obj.has("x") && obj.has("y")) {
+                        val x = obj.getDouble("x").toFloat()
+                        val y = obj.getDouble("y").toFloat()
+                        val displayMetrics = resources.displayMetrics
+                        val targetX = if (x <= 1.0f) x * displayMetrics.widthPixels else x
+                        val targetY = if (y <= 1.0f) y * displayMetrics.heightPixels else y
+
+                        if (action == "swipe") {
+                            val x2 = obj.optDouble("x2", x.toDouble()).toFloat()
+                            val y2 = obj.optDouble("y2", y.toDouble()).toFloat()
+                            val targetX2 = if (x2 <= 1.0f) x2 * displayMetrics.widthPixels else x2
+                            val targetY2 = if (y2 <= 1.0f) y2 * displayMetrics.heightPixels else y2
+                            val duration = obj.optLong("duration", 300L)
+                            val success = JunoAccessibilityService.swipe(targetX, targetY, targetX2, targetY2, duration)
+                            if (!success) {
+                                JunoServiceState.log("Failed to inject swipe. Is Accessibility Service enabled?")
+                            }
+                        } else {
+                            val success = JunoAccessibilityService.tap(targetX, targetY)
+                            if (!success) {
+                                JunoServiceState.log("Failed to inject tap. Is Accessibility Service enabled?")
+                            }
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -1076,8 +1151,113 @@ class JunoComputeService : Service() {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
+    private fun startScreenCapture(resultIntent: Intent) {
+        if (screenMirrorJob != null) return
+        try {
+            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            mediaProjection = projectionManager.getMediaProjection(android.app.Activity.RESULT_OK, resultIntent)
+            if (mediaProjection == null) {
+                JunoServiceState.log("MediaProjection failed: null projection")
+                return
+            }
+
+            // Get screen metrics
+            val metrics = resources.displayMetrics
+            val width = 480 // scale down for transmission speed
+            val height = (metrics.heightPixels.toFloat() / metrics.widthPixels.toFloat() * width).toInt()
+            val density = metrics.densityDpi
+
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            virtualDisplay = mediaProjection?.createVirtualDisplay(
+                "JunoScreenMirror",
+                width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface, null, null
+            )
+
+            screenMirrorJob = serviceScope.launch(Dispatchers.IO) {
+                JunoServiceState.log("Screen mirroring loop started ($width x $height)")
+                while (true) {
+                    delay(200) // ~5 FPS
+                    if (webSocket == null) continue
+
+                    val image = try {
+                        imageReader?.acquireLatestImage()
+                    } catch (e: Exception) {
+                        null
+                    }
+
+                    if (image != null) {
+                        try {
+                            val planes = image.planes
+                            val buffer = planes[0].buffer
+                            val pixelStride = planes[0].pixelStride
+                            val rowStride = planes[0].rowStride
+                            val rowPadding = rowStride - pixelStride * width
+
+                            // Create bitmap matching the actual stride
+                            val bitmap = Bitmap.createBitmap(
+                                width + rowPadding / pixelStride,
+                                height,
+                                Bitmap.Config.ARGB_8888
+                            )
+                            bitmap.copyPixelsFromBuffer(buffer)
+
+                            val croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+
+                            // Compress bitmap
+                            val outputStream = ByteArrayOutputStream()
+                            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+                            val jpegBytes = outputStream.toByteArray()
+                            val base64String = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+
+                            // Send frame
+                            val frameMsg = JSONObject().apply {
+                                put("type", "screen_frame")
+                                put("data", base64String)
+                            }
+                            webSocket?.send(frameMsg.toString())
+                            
+                            bitmap.recycle()
+                            croppedBitmap.recycle()
+                        } catch (e: Exception) {
+                            // Ignored
+                        } finally {
+                            image.close()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            JunoServiceState.log("Failed to start screen capture: ${e.localizedMessage}")
+            stopScreenCapture()
+        }
+    }
+
+    private fun stopScreenCapture() {
+        screenMirrorJob?.cancel()
+        screenMirrorJob = null
+        try {
+            virtualDisplay?.release()
+        } catch (e: Exception) {}
+        virtualDisplay = null
+        try {
+            imageReader?.close()
+        } catch (e: Exception) {}
+        imageReader = null
+        try {
+            mediaProjection?.stop()
+        } catch (e: Exception) {}
+        mediaProjection = null
+        JunoServiceState.log("Screen mirroring loop stopped.")
+    }
+
     companion object {
         const val CHANNEL_ID = "juno_compute_service_channel"
         const val NOTIFICATION_ID = 4501
+        
+        const val ACTION_START_MIRROR = "com.example.service.action.START_MIRROR"
+        const val ACTION_STOP_MIRROR = "com.example.service.action.STOP_MIRROR"
+        const val EXTRA_PROJECTION_RESULT_INTENT = "com.example.service.extra.PROJECTION_RESULT_INTENT"
     }
 }
