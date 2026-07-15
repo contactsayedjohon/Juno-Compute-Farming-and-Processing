@@ -71,8 +71,9 @@ class JunoViewModel(application: Application) : AndroidViewModel(application) {
     fun pairWithCode(code: String): Boolean {
         // Simple mock validation of 6-digit code
         if (code.length == 6 && code.all { it.isDigit() }) {
-            prefs.serverUrl = "wss://cluster.junoverseai.com/ws/node"
-            prefs.pairingToken = "usr_${prefs.userId}_pair_${code}"
+            // Using same backend WebSocket route, not a mocked string
+            prefs.serverUrl = "ws://10.0.2.2:8000/ws/node"
+            prefs.pairingToken = code
             prefs.isPaired = true
 
             startWorkerService()

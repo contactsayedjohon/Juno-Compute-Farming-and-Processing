@@ -617,7 +617,19 @@ fun SetupScreen(
                                     .border(1.dp, JunoBorder, RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CameraPreviewView()
+                                CameraPreviewView(onQrCodeScanned = { qrPayload ->
+                                    isLoading = true
+                                    loadingMessage = "Scanning and verifying Cloud QR signature..."
+                                    coroutineScope.launch {
+                                        val pairSuccess = viewModel.pairWithJson(qrPayload)
+                                        isLoading = false
+                                        if (pairSuccess) {
+                                            onPairingSuccess()
+                                        } else {
+                                            Toast.makeText(context, "Invalid QR code payload", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                })
                                 Box(
                                     modifier = Modifier
                                         .size(100.dp)
@@ -655,41 +667,6 @@ fun SetupScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Trigger Simulator Button (SaaS QR JSON scan payload)
-                        Button(
-                            onClick = {
-                                isLoading = true
-                                loadingMessage = "Scanning and verifying Cloud QR signature..."
-                                coroutineScope.launch {
-                                    delay(1000) // simulated scan delay
-                                    isLoading = false
-                                    val qrPayload = """
-                                        {
-                                          "server_url": "wss://cluster.junoverseai.com/ws/node",
-                                          "pairing_token": "usr_${viewModel.prefs.userId}_pair_xyz789",
-                                          "user_id": "${viewModel.prefs.userId}"
-                                        }
-                                    """.trimIndent()
-                                    
-                                    val pairSuccess = viewModel.pairWithJson(qrPayload)
-                                    if (pairSuccess) {
-                                        onPairingSuccess()
-                                    } else {
-                                        Toast.makeText(context, "Invalid QR code payload", Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = JunoSurfaceVariant),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("simulate_scan_button")
-                        ) {
-                            Icon(Icons.Default.Bolt, "Simulate", tint = JunoTertiary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Simulate QR Code Scan", color = JunoTextPrimary, fontSize = 13.sp)
-                        }
                     }
                 }
 
@@ -951,7 +928,7 @@ fun PermissionItem(
 
 @SuppressLint("UnrememberedMutableState")
 @Composable
-fun CameraPreviewView() {
+fun CameraPreviewView(onQrCodeScanned: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
@@ -964,10 +941,20 @@ fun CameraPreviewView() {
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
+
+                val imageAnalysis = androidx.camera.core.ImageAnalysis.Builder()
+                    .setBackpressureStrategy(androidx.camera.core.ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also {
+                        it.setAnalyzer(ContextCompat.getMainExecutor(ctx), QrCodeAnalyzer { qrPayload ->
+                            onQrCodeScanned(qrPayload)
+                        })
+                    }
+
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                 try {
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                    cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis)
                 } catch (e: Exception) {
                     // Fail gracefully
                 }
