@@ -69,6 +69,7 @@ object JunoServiceState {
     }
 
     fun log(message: String) {
+        android.util.Log.d("JunoCompute", message)
         val timestamp = dateFormat.format(Date())
         val logLine = "[$timestamp] $message"
         val currentList = _logs.value.toMutableList()
