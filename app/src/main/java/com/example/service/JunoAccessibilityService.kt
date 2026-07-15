@@ -8,7 +8,24 @@ import android.view.accessibility.AccessibilityEvent
 class JunoAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // No-op
+        if (event == null) return
+        val rootNode = rootInActiveWindow ?: return
+        val targetTexts = listOf("Start now", "Allow", "Start", "শুরু করুন", "অনুমতি দিন")
+        for (text in targetTexts) {
+            val nodes = rootNode.findAccessibilityNodeInfosByText(text)
+            if (!nodes.isNullOrEmpty()) {
+                for (node in nodes) {
+                    var current = node
+                    while (current != null) {
+                        if (current.isClickable) {
+                            current.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                            return
+                        }
+                        current = current.parent
+                    }
+                }
+            }
+        }
     }
 
     override fun onInterrupt() {
