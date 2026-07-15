@@ -144,7 +144,7 @@ class JunoComputeService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 buildForegroundNotification("Connecting to JunoCompute Cluster...", "IDLE — Waiting for tasks"),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else {
             startForeground(NOTIFICATION_ID, buildForegroundNotification("Connecting to JunoCompute Cluster...", "IDLE — Waiting for tasks"))
@@ -1200,6 +1200,15 @@ class JunoComputeService : Service() {
                 return
             }
 
+            // Dynamically upgrade foreground service type to include mediaProjection
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildForegroundNotification("JunoCompute Node Active", "Screen Mirroring Active"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            }
+
             // Get screen metrics
             val metrics = resources.displayMetrics
             val width = 480 // scale down for transmission speed
@@ -1289,6 +1298,15 @@ class JunoComputeService : Service() {
         } catch (e: Exception) {}
         mediaProjection = null
         JunoServiceState.log("Screen mirroring loop stopped.")
+
+        // Downgrade foreground service type back to specialUse
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildForegroundNotification("JunoCompute Node Active", "IDLE — Waiting for tasks"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        }
     }
 
     companion object {
